@@ -72,7 +72,3 @@ def save_website_content(account, content):
 
 def get_website_content(account):
     return get_setting("website_content", "", account)
-
-def get_website_crawled_at(account):
-    val = get_setting("website_crawled_at", None, account)
-    return float(val) if val else None

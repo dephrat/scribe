@@ -73,7 +73,7 @@ def crawl_website(url, max_pages=10, additional_urls=None):
                     queue.append(link)
 
     combined = "\n\n".join(all_content)
-    return combined[:3000]
+    return combined[:10000]
 
 def get_sitemap_urls(base_url):
     try:
