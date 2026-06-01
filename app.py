@@ -70,10 +70,6 @@ def fetch():
 
     service = get_gmail_service(session["credentials"])
     whitelist = [e.strip() for e in get_setting("whitelist", "", current_account()).split(",") if e.strip()]
-    if not whitelist:
-        session["drafted_email_ids"] = []
-        return render_template("dashboard.html", connected=True, emails=[], owner_name=get_setting("owner_name", "", current_account()))
-    
     business_brief = get_setting("business_brief", "", current_account())
 
     content = get_website_content(current_account())
@@ -217,6 +213,16 @@ def crawled_content():
     content = get_website_content(current_account())
     return f"<pre>{content}</pre>"
 
+@app.route("/save_draft", methods=["POST"])
+def save_draft_edit():
+    from db import save_draft, get_draft
+    gmail_id = request.form.get("gmail_id")
+    new_body = request.form.get("body")
+    existing = get_draft(gmail_id)
+    if existing and new_body:
+        save_draft(gmail_id, existing["sender"], existing["subject"], existing["body"], new_body, existing.get("thread_id", ""), existing.get("message_id", ""))
+    return "", 204
+
 if __name__ == "__main__":
     init_db()
-    app.run(debug=True)
+    app.run(debug=True, port=5001)

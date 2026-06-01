@@ -39,8 +39,11 @@ def get_gmail_service(credentials_dict):
     return build("gmail", "v1", credentials=creds)
 
 def get_new_emails(service, whitelist):
-    query = " OR ".join([f"from:{addr}" for addr in whitelist])
-    query += " -label:ai-employee-review in:inbox"
+    if whitelist:
+        query = " OR ".join([f"from:{addr}" for addr in whitelist])
+        query += " -label:ai-employee-review in:inbox"
+    else:
+        query = "-label:ai-employee-review in:inbox"
     result = service.users().messages().list(
         userId="me",
         q=query
