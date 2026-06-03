@@ -171,6 +171,8 @@ def regenerate():
 def settings():
     account = current_account()
     if request.method == "POST":
+        if not account:
+            return jsonify({"error": "not_connected"}), 401
         data = request.get_json()
         save_setting("owner_name", data.get("owner_name"), account)
         save_setting("business_brief", data.get("business_brief"), account)
@@ -179,6 +181,7 @@ def settings():
         save_setting("max_crawl_pages", data.get("max_crawl_pages"), account)
         save_setting("additional_urls", data.get("additional_urls"), account)
         save_setting("max_emails", data.get("max_emails"), account)
+        save_setting("timezone", data.get("timezone"), account)
         return jsonify({"saved": True})
 
     return jsonify({
@@ -189,6 +192,7 @@ def settings():
         "max_crawl_pages": get_setting("max_crawl_pages", "10", account),
         "additional_urls": get_setting("additional_urls", "", account),
         "max_emails": get_setting("max_emails", "100", account),
+        "timezone": get_setting("timezone", "America/Toronto", account),
     })
 
 @app.route("/api/crawl", methods=["POST"])
@@ -217,11 +221,6 @@ def save_draft_edit():
 def logout():
     session.clear()
     return jsonify({"logged_out": True})
-
-@app.route("/crawled-content")
-def crawled_content():
-    content = get_website_content(current_account())
-    return f"<pre>{content}</pre>"
 
 if __name__ == "__main__":
     init_db()

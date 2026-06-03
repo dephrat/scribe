@@ -24,7 +24,7 @@ You received an email from {sender} with subject "{subject}":
 Write a professional, friendly reply on behalf of the business owner. Keep it concise. Do not include a subject line, just the email body."""
 
     message = client.messages.create(
-        model="claude-sonnet-4-5",
+        model="claude-sonnet-4-6",
         max_tokens=1024,
         temperature=0,
         messages=[{"role": "user", "content": prompt}]

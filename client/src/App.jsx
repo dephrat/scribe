@@ -6,10 +6,11 @@ function Settings({ onBack }) {
   const [form, setForm] = useState({
     owner_name: '', business_brief: '', whitelist: '',
     website_url: '', additional_urls: '', max_crawl_pages: '10',
-    max_emails: '100'
+    max_emails: '100', timezone: 'America/Toronto'
   })
   const [message, setMessage] = useState('')
   const [crawling, setCrawling] = useState(false)
+  const [activeSection, setActiveSection] = useState('business')
 
   useEffect(() => {
     fetch(`${API}/api/settings`, { credentials: 'include' })
@@ -40,63 +41,127 @@ function Settings({ onBack }) {
     setTimeout(() => setMessage(''), 3000)
   }
 
+  const sections = [
+    { id: 'business', label: 'Business Info' },
+    { id: 'crawling', label: 'Web Crawling' },
+    { id: 'fetching', label: 'Fetching' },
+    { id: 'display', label: 'Email Display' },
+  ]
+
   return (
-    <div style={styles.container}>
+    <div style={styles.settingsContainer}>
       <div style={styles.topBar}>
         <span style={styles.logo}>Scribe</span>
         <button onClick={onBack} style={styles.linkBtn}>← Back to Dashboard</button>
       </div>
 
-      <h2>Settings</h2>
-      {message && <div style={styles.successMsg}>{message}</div>}
+      <div style={styles.settingsLayout}>
+        {/* Sidebar */}
+        <div style={styles.sidebar}>
+          <h3 style={styles.sidebarTitle}>Settings</h3>
+          {sections.map(s => (
+            <button
+              key={s.id}
+              onClick={() => setActiveSection(s.id)}
+              style={{
+                ...styles.sidebarItem,
+                ...(activeSection === s.id ? styles.sidebarItemActive : {})
+              }}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
 
-      <div style={styles.field}>
-        <label style={styles.label}>Your Name</label>
-        <p style={styles.hint}>Your full name, shown on the dashboard.</p>
-        <input style={styles.input} value={form.owner_name} onChange={e => setForm({...form, owner_name: e.target.value})} />
-      </div>
+        {/* Content */}
+        <div style={styles.settingsContent}>
+          {message && <div style={styles.successMsg}>{message}</div>}
 
-      <div style={styles.field}>
-        <label style={styles.label}>Business Brief</label>
-        <p style={styles.hint}>Describe your business, your name, and the tone you want replies to have.</p>
-        <textarea style={styles.textarea2} value={form.business_brief} onChange={e => setForm({...form, business_brief: e.target.value})} />
-      </div>
+          {activeSection === 'business' && (
+            <>
+              <h3 style={styles.sectionHeader}>Business Info</h3>
+              <div style={styles.field}>
+                <label style={styles.label}>Your Name</label>
+                <p style={styles.hint}>Your full name, shown on the dashboard.</p>
+                <input style={styles.input} value={form.owner_name} onChange={e => setForm({...form, owner_name: e.target.value})} />
+              </div>
+              <div style={styles.field}>
+                <label style={styles.label}>Business Brief</label>
+                <p style={styles.hint}>Describe your business, your name, and the tone you want replies to have.</p>
+                <textarea style={styles.textarea2} value={form.business_brief} onChange={e => setForm({...form, business_brief: e.target.value})} />
+              </div>
+              <button onClick={save} style={styles.fetchBtn}>Save</button>
+            </>
+          )}
 
-      <div style={styles.field}>
-        <label style={styles.label}>Whitelist</label>
-        <p style={styles.hint}>Comma-separated email addresses to watch. Leave empty to fetch all inbox emails.</p>
-        <input style={styles.input} value={form.whitelist} onChange={e => setForm({...form, whitelist: e.target.value})} />
-      </div>
+          {activeSection === 'crawling' && (
+            <>
+              <h3 style={styles.sectionHeader}>Web Crawling</h3>
+              <div style={styles.field}>
+                <label style={styles.label}>Website URL</label>
+                <p style={styles.hint}>Your business website. Click "Crawl Now" to fetch the latest content.</p>
+                <input style={styles.input} value={form.website_url} onChange={e => setForm({...form, website_url: e.target.value})} />
+              </div>
+              <div style={styles.field}>
+                <label style={styles.label}>Additional Pages to Crawl</label>
+                <p style={styles.hint}>Comma-separated URLs of specific pages to crawl.</p>
+                <input style={styles.input} value={form.additional_urls} onChange={e => setForm({...form, additional_urls: e.target.value})} />
+              </div>
+              <div style={styles.field}>
+                <label style={styles.label}>Max Pages to Crawl</label>
+                <p style={styles.hint}>Total pages to crawl across all URLs.</p>
+                <input style={styles.input} value={form.max_crawl_pages} onChange={e => setForm({...form, max_crawl_pages: e.target.value})} />
+              </div>
+              <div style={styles.actions}>
+                <button onClick={save} style={styles.fetchBtn}>Save</button>
+                <button onClick={crawl} style={styles.approveBtn} disabled={crawling}>
+                  {crawling ? 'Crawling...' : 'Crawl Now'}
+                </button>
+              </div>
+            </>
+          )}
 
-      <div style={styles.field}>
-        <label style={styles.label}>Website URL</label>
-        <p style={styles.hint}>Your business website. Click "Crawl Now" to fetch the latest content.</p>
-        <input style={styles.input} value={form.website_url} onChange={e => setForm({...form, website_url: e.target.value})} />
-      </div>
+          {activeSection === 'fetching' && (
+            <>
+              <h3 style={styles.sectionHeader}>Fetching</h3>
+              <div style={styles.field}>
+                <label style={styles.label}>Whitelist</label>
+                <p style={styles.hint}>Comma-separated email addresses to watch. Leave empty to fetch all inbox emails.</p>
+                <input style={styles.input} value={form.whitelist} onChange={e => setForm({...form, whitelist: e.target.value})} />
+              </div>
+              <div style={styles.field}>
+                <label style={styles.label}>Max Emails to Fetch</label>
+                <p style={styles.hint}>Maximum number of emails to fetch at once. Defaults to 100 if left blank.</p>
+                <input style={styles.input} value={form.max_emails} onChange={e => setForm({...form, max_emails: e.target.value})} />
+              </div>
+              <button onClick={save} style={styles.fetchBtn}>Save</button>
+            </>
+          )}
 
-      <div style={styles.field}>
-        <label style={styles.label}>Additional Pages to Crawl</label>
-        <p style={styles.hint}>Comma-separated URLs of specific pages to crawl.</p>
-        <input style={styles.input} value={form.additional_urls} onChange={e => setForm({...form, additional_urls: e.target.value})} />
-      </div>
-
-      <div style={styles.field}>
-        <label style={styles.label}>Max Pages to Crawl</label>
-        <p style={styles.hint}>How many pages of your website to crawl.</p>
-        <input style={styles.input} value={form.max_crawl_pages} onChange={e => setForm({...form, max_crawl_pages: e.target.value})} />
-      </div>
-
-      <div style={styles.field}>
-        <label style={styles.label}>Max Emails to Fetch</label>
-        <p style={styles.hint}>Maximum number of emails to fetch at once. Defaults to 100 if left blank.</p>
-        <input style={styles.input} value={form.max_emails} onChange={e => setForm({...form, max_emails: e.target.value})} />
-      </div>
-
-      <div style={styles.actions}>
-        <button onClick={save} style={styles.fetchBtn}>Save</button>
-        <button onClick={crawl} style={styles.approveBtn} disabled={crawling}>
-          {crawling ? 'Crawling...' : 'Crawl Now'}
-        </button>
+          {activeSection === 'display' && (
+            <>
+              <h3 style={styles.sectionHeader}>Email Display</h3>
+              <div style={styles.field}>
+                <label style={styles.label}>Timezone</label>
+                <p style={styles.hint}>Timezone for displaying email dates.</p>
+                <select style={styles.input} value={form.timezone} onChange={e => setForm({...form, timezone: e.target.value})}>
+                  <option value="America/Toronto">Eastern (Toronto)</option>
+                  <option value="America/Chicago">Central (Chicago)</option>
+                  <option value="America/Denver">Mountain (Denver)</option>
+                  <option value="America/Los_Angeles">Pacific (Los Angeles)</option>
+                  <option value="America/Vancouver">Pacific (Vancouver)</option>
+                  <option value="America/Halifax">Atlantic (Halifax)</option>
+                  <option value="America/St_Johns">Newfoundland</option>
+                  <option value="Europe/London">London</option>
+                  <option value="Europe/Paris">Paris</option>
+                  <option value="Asia/Jerusalem">Jerusalem</option>
+                  <option value="UTC">UTC</option>
+                </select>
+              </div>
+              <button onClick={save} style={styles.fetchBtn}>Save</button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -112,18 +177,40 @@ function App() {
   const [editMode, setEditMode] = useState(false)
   const [editedBody, setEditedBody] = useState('')
   const [view, setView] = useState('dashboard')
+  const [timezone, setTimezone] = useState('America/Toronto')
+
+  function formatDate(dateStr, tz) {
+    try {
+      return new Date(dateStr).toLocaleString('en-CA', {
+        timeZone: tz,
+        year: 'numeric', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      })
+    } catch {
+      return dateStr
+    }
+  }
 
   useEffect(() => {
     checkStatus()
   }, [])
 
   async function checkStatus() {
-    const res = await fetch(`${API}/api/status`, { credentials: 'include' })
-    const data = await res.json()
-    setConnected(data.connected)
-    setOwnerName(data.owner_name)
-    setEmails(data.emails)
-    setLoading(false)
+    try {
+      const res = await fetch(`${API}/api/status`, { credentials: 'include' })
+      const data = await res.json()
+      setConnected(data.connected)
+      setOwnerName(data.owner_name)
+      setEmails(data.emails)
+      
+      const settingsRes = await fetch(`${API}/api/settings`, { credentials: 'include' })
+      const settingsData = await settingsRes.json()
+      setTimezone(settingsData.timezone || 'America/Toronto')
+    } catch (e) {
+      console.error('checkStatus failed:', e)
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function fetchEmails() {
@@ -232,7 +319,7 @@ function App() {
           <div style={styles.progress}>{currentIndex + 1} of {emails.length}</div>
           <h2 style={styles.subject}>{email.subject}</h2>
           <div style={styles.meta}>From: {email.sender}</div>
-          <div style={styles.meta}>{email.date}</div>
+          <div style={styles.meta}>{formatDate(email.date, timezone)}</div>
 
           <div style={styles.section}>
             <div style={styles.sectionLabel}>Original</div>
@@ -258,7 +345,17 @@ function App() {
             <button onClick={dismissEmail} style={styles.dismissBtn}>Dismiss</button>
             <button onClick={regenerate} style={styles.regenBtn}>Regenerate</button>
             {editMode ? (
-              <button onClick={() => setEditMode(false)} style={styles.editBtn}>Done</button>
+              <button onClick={async () => {
+                const updated = emails.map((e, i) => i === currentIndex ? { ...e, draft_reply: editedBody } : e)
+                setEmails(updated)
+                setEditMode(false)
+                await fetch(`${API}/api/save_draft`, {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ gmail_id: email.gmail_id, body: editedBody })
+                })
+              }} style={styles.editBtn}>Done</button>
             ) : (
               <button onClick={startEdit} style={styles.editBtn}>Edit</button>
             )}
@@ -270,7 +367,7 @@ function App() {
 }
 
 const styles = {
-  container: { fontFamily: 'Arial, sans-serif', maxWidth: 700, margin: '0 auto', padding: '20px' },
+  container: { fontFamily: 'Arial, sans-serif', width: 900, margin: '0 auto', padding: '20px', boxSizing: 'border-box' },
   topBar: { display: 'flex', alignItems: 'center', gap: 16, marginBottom: 32, borderBottom: '1px solid #eee', paddingBottom: 16 },
   logo: { fontWeight: 'bold', fontSize: 20, marginRight: 'auto' },
   greeting: { color: '#666', fontSize: 14 },
@@ -299,6 +396,16 @@ const styles = {
   hint: { color: '#666', fontSize: 13, margin: '0 0 8px 0' },
   input: { width: '100%', padding: 10, border: '1px solid #ddd', borderRadius: 4, fontSize: 14, boxSizing: 'border-box' },
   successMsg: { color: 'green', fontWeight: 'bold', marginBottom: 16 },
+  settingsSection: { borderTop: '1px solid #eee', paddingTop: 24, marginTop: 24 },
+  sectionHeader: { fontSize: 16, fontWeight: 'bold', marginBottom: 20, color: '#333' },
+  inlineSuccess: { marginLeft: 12, color: 'green', fontSize: 14 },
+  sidebarTitle: { fontSize: 13, fontWeight: 'bold', color: '#999', textTransform: 'uppercase', marginBottom: 12 },
+  sidebarItem: { background: 'none', border: 'none', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 14, color: '#333', width: '100%', textAlign: 'left' },
+  sidebarItemActive: { background: '#e8f0fe', fontWeight: 'bold', color: '#1a56db' },
+  settingsContainer: { fontFamily: 'Arial, sans-serif', width: 900, margin: '0 auto', padding: '20px', boxSizing: 'border-box' },
+  settingsLayout: { display: 'grid', gridTemplateColumns: '180px 1fr', gap: 32, marginTop: 16 },
+  sidebar: { width: 180 },
+  settingsContent: { minWidth: 0 },
 }
 
 export default App
