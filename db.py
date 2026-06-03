@@ -19,6 +19,7 @@ def init_db():
             subject TEXT,
             body TEXT,
             draft_reply TEXT,
+            date TEXT,
             status TEXT DEFAULT 'pending',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -52,12 +53,12 @@ def get_draft(gmail_id):
     conn.close()
     return dict(row) if row else None
 
-def save_draft(gmail_id, sender, subject, body, draft_reply, thread_id="", message_id=""):
+def save_draft(gmail_id, sender, subject, body, draft_reply, thread_id="", message_id="", date=""):
     conn = get_db()
     conn.execute("""
-        INSERT OR REPLACE INTO emails (gmail_id, thread_id, message_id, sender, subject, body, draft_reply, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
-    """, (gmail_id, thread_id, message_id, sender, subject, body, draft_reply))
+        INSERT OR REPLACE INTO emails (gmail_id, thread_id, message_id, sender, subject, body, draft_reply, date, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+    """, (gmail_id, thread_id, message_id, sender, subject, body, draft_reply, date))
     conn.commit()
     conn.close()
 

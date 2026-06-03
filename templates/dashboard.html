@@ -43,6 +43,7 @@
             <div class="email-card" id="card-{{ loop.index }}">
                 <h3>{{ email.subject }}</h3>
                 <div class="sender">From: {{ email.sender }}</div>
+                <div style="color: #999; font-size: 13px; margin-bottom: 10px;">{{ email.date }}</div>
                 <div style="background: #fff; border: 1px solid #eee; padding: 15px; border-radius: 4px; margin-bottom: 10px; white-space: pre-wrap; font-size: 14px;">{{ email.body }}</div>
 
                 <input type="hidden" id="gmail-id-{{ loop.index }}" value="{{ email.gmail_id }}">

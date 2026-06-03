@@ -6,11 +6,13 @@ from google.auth.exceptions import RefreshError
 from crawler import crawl_website
 from db import init_db, get_setting, save_setting, delete_draft, get_draft, get_website_content, save_website_content
 from gmail import get_oauth_flow, credentials_to_dict
+from flask_cors import CORS
 
 load_dotenv()
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 app = Flask(__name__)
+CORS(app)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 def current_account():
@@ -83,7 +85,7 @@ def fetch():
         if existing:
             return existing["gmail_id"]
         reply = draft_reply(email["body"], email["sender"], email["subject"], business_brief)
-        save_draft(email["gmail_id"], email["sender"], email["subject"], email["body"], reply, email["thread_id"], email["message_id"])
+        save_draft(email["gmail_id"], email["sender"], email["subject"], email["body"], reply, email["thread_id"], email["message_id"], email.get("date", ""))
         return email["gmail_id"]
 
     with ThreadPoolExecutor() as executor:

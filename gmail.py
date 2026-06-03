@@ -77,7 +77,8 @@ def get_new_emails(service, whitelist):
             "message_id": headers.get("Message-ID", ""),
             "sender": headers.get("From", ""),
             "subject": headers.get("Subject", ""),
-            "body": body
+            "body": body,
+            "date": headers.get("Date", "")
         })
 
     return emails
