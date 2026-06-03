@@ -5,9 +5,28 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from concurrent.futures import ThreadPoolExecutor
+import re
+from html.parser import HTMLParser
+from bs4 import BeautifulSoup
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 CLIENT_SECRETS_FILE = os.getenv("GOOGLE_CLIENT_SECRETS", "credentials/credentials.json")
+
+def strip_html(text):
+    soup = BeautifulSoup(text, "html.parser")
+    return soup.get_text(separator="\n")
+
+def clean_body(text):
+    # Remove numeric HTML entities (e.g. &#8199;)
+    text = re.sub(r'&#\d+;', '', text)
+    # Remove named HTML entities (e.g. &zwnj; &amp;)
+    text = re.sub(r'&[a-z]+;', '', text)
+    # Remove quoted-printable artifacts (e.g. =20)
+    text = re.sub(r'=\d{2}', '', text)
+    # Collapse excessive newlines and spaces
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r' {2,}', ' ', text)
+    return text.strip()
 
 def get_oauth_flow(redirect_uri):
     flow = Flow.from_client_secrets_file(
@@ -68,8 +87,13 @@ def get_new_emails(service, whitelist):
                 if part["mimeType"] == "text/plain":
                     body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
                     break
+                elif part["mimeType"] == "text/html" and not body:
+                    raw_html = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
+                    body = strip_html(raw_html)
         elif "body" in payload and "data" in payload["body"]:
             body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
+
+        body = clean_body(body)
 
         emails.append({
             "gmail_id": msg["id"],

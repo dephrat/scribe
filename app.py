@@ -1,7 +1,7 @@
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, jsonify, request, redirect, url_for, session
 from google.auth.exceptions import RefreshError
 from crawler import crawl_website
 from db import init_db, get_setting, save_setting, delete_draft, get_draft, get_website_content, save_website_content
@@ -12,7 +12,7 @@ load_dotenv()
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 def current_account():
@@ -24,17 +24,21 @@ def get_emails_from_db(gmail_ids):
 @app.errorhandler(RefreshError)
 def handle_refresh_error(e):
     session.clear()
-    return redirect(url_for("dashboard"))
+    return jsonify({"error": "session_expired"}), 401
 
-@app.route("/")
-def dashboard():
+@app.route("/api/status")
+def status():
     connected = session.get("credentials") is not None
     owner_name = get_setting("owner_name", "", current_account())
     emails = []
     if connected:
         ids = session.get("drafted_email_ids", [])
         emails = get_emails_from_db(ids)
-    return render_template("dashboard.html", connected=connected, owner_name=owner_name, emails=emails)
+    return jsonify({
+        "connected": connected,
+        "owner_name": owner_name,
+        "emails": emails
+    })
 
 @app.route("/connect")
 def connect():
@@ -59,12 +63,12 @@ def oauth_callback():
     service = get_gmail_service(session["credentials"])
     session["account_email"] = get_account_email(service)
 
-    return redirect(url_for("dashboard"))
+    return redirect("http://localhost:5173")
 
-@app.route("/fetch")
+@app.route("/api/fetch")
 def fetch():
     if not session.get("credentials"):
-        return redirect(url_for("connect"))
+        return jsonify({"error": "not_connected"}), 401
 
     from gmail import get_gmail_service, get_new_emails
     from ai import draft_reply
@@ -74,11 +78,13 @@ def fetch():
     whitelist = [e.strip() for e in get_setting("whitelist", "", current_account()).split(",") if e.strip()]
     business_brief = get_setting("business_brief", "", current_account())
 
+    max_emails = int(get_setting("max_emails", "100", current_account()) or "100")
+    emails = get_new_emails(service, whitelist)
+    emails = emails[:max_emails]
+
     content = get_website_content(current_account())
     if content:
         business_brief = business_brief + "\n\nWebsite content:\n" + content
-
-    emails = get_new_emails(service, whitelist)
 
     def process_email(email):
         existing = get_draft(email["gmail_id"])
@@ -93,50 +99,38 @@ def fetch():
 
     session["drafted_email_ids"] = gmail_ids
     results = get_emails_from_db(gmail_ids)
-    return render_template("dashboard.html", connected=True, emails=results, owner_name=get_setting("owner_name", "", current_account()))
+    return jsonify({"emails": results})
 
-@app.route("/send", methods=["POST"])
+@app.route("/api/send", methods=["POST"])
 def send():
     if not session.get("credentials"):
-        return redirect(url_for("connect"))
+        return jsonify({"error": "not_connected"}), 401
 
     from gmail import get_gmail_service, send_reply, archive_email
 
     service = get_gmail_service(session["credentials"])
+    data = request.get_json()
 
-    to = request.form.get("to")
-    subject = request.form.get("subject")
-    body = request.form.get("body")
-    gmail_id = request.form.get("gmail_id")
-    thread_id = request.form.get("thread_id")
-    message_id = request.form.get("message_id")
-
-    send_reply(service, to, subject, body, thread_id, message_id)
-    if gmail_id:
-        archive_email(service, gmail_id)
-        delete_draft(gmail_id)
+    send_reply(service, data["to"], data["subject"], data["body"], data["thread_id"], data["message_id"])
+    archive_email(service, data["gmail_id"])
+    delete_draft(data["gmail_id"])
 
     ids = session.get("drafted_email_ids", [])
-    ids = [i for i in ids if i != gmail_id]
+    ids = [i for i in ids if i != data["gmail_id"]]
     session["drafted_email_ids"] = ids
     emails = get_emails_from_db(ids)
+    return jsonify({"emails": emails})
 
-    return render_template("dashboard.html", connected=True, emails=emails, owner_name=get_setting("owner_name", "", current_account()))
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("dashboard"))
-
-@app.route("/dismiss", methods=["POST"])
+@app.route("/api/dismiss", methods=["POST"])
 def dismiss():
     if not session.get("credentials"):
-        return redirect(url_for("connect"))
+        return jsonify({"error": "not_connected"}), 401
 
     from gmail import get_gmail_service, label_email
 
     service = get_gmail_service(session["credentials"])
-    gmail_id = request.form.get("gmail_id")
+    data = request.get_json()
+    gmail_id = data.get("gmail_id")
 
     if gmail_id:
         label_email(service, gmail_id, "ai-employee-review")
@@ -146,42 +140,18 @@ def dismiss():
     ids = [i for i in ids if i != gmail_id]
     session["drafted_email_ids"] = ids
     emails = get_emails_from_db(ids)
+    return jsonify({"emails": emails})
 
-    return render_template("dashboard.html", connected=True, emails=emails, owner_name=get_setting("owner_name", "", current_account()))
-
-@app.route("/settings", methods=["GET", "POST"])
-def settings():
-    saved = False
-    account = current_account()
-    if request.method == "POST":
-        save_setting("owner_name", request.form.get("owner_name"), account)
-        save_setting("business_brief", request.form.get("business_brief"), account)
-        save_setting("whitelist", request.form.get("whitelist"), account)
-        save_setting("website_url", request.form.get("website_url"), account)
-        save_setting("max_crawl_pages", request.form.get("max_crawl_pages"), account)
-        save_setting("additional_urls", request.form.get("additional_urls"), account)
-        saved = True
-
-    owner_name = get_setting("owner_name", "", account)
-    business_brief = get_setting("business_brief", "", account)
-    whitelist = get_setting("whitelist", "", account)
-    website_url = get_setting("website_url", "", account)
-    max_crawl_pages = get_setting("max_crawl_pages", "10", account)
-    additional_urls = get_setting("additional_urls", "", account)
-
-    crawled = request.args.get("crawled")
-    message = "✓ Website crawled!" if crawled else ("✓ Settings saved!" if saved else None)
-    return render_template("settings.html", owner_name=owner_name, business_brief=business_brief, whitelist=whitelist, website_url=website_url, max_crawl_pages=max_crawl_pages, additional_urls=additional_urls, message=message)
-
-@app.route("/regenerate", methods=["POST"])
+@app.route("/api/regenerate", methods=["POST"])
 def regenerate():
     if not session.get("credentials"):
-        return redirect(url_for("connect"))
+        return jsonify({"error": "not_connected"}), 401
 
     from ai import draft_reply
     from db import save_draft
 
-    gmail_id = request.form.get("gmail_id")
+    data = request.get_json()
+    gmail_id = data.get("gmail_id")
     business_brief = get_setting("business_brief", "", current_account())
 
     content = get_website_content(current_account())
@@ -192,15 +162,37 @@ def regenerate():
     if existing:
         new_reply = draft_reply(existing["body"], existing["sender"], existing["subject"], business_brief)
         save_draft(gmail_id, existing["sender"], existing["subject"], existing["body"], new_reply, existing.get("thread_id", ""), existing.get("message_id", ""))
+        updated = get_draft(gmail_id)
+        return jsonify({"email": updated})
 
-    ids = session.get("drafted_email_ids", [])
-    emails = get_emails_from_db(ids)
+    return jsonify({"error": "not_found"}), 404
 
-    return render_template("dashboard.html", connected=True, emails=emails, owner_name=get_setting("owner_name", "", current_account()))
+@app.route("/api/settings", methods=["GET", "POST"])
+def settings():
+    account = current_account()
+    if request.method == "POST":
+        data = request.get_json()
+        save_setting("owner_name", data.get("owner_name"), account)
+        save_setting("business_brief", data.get("business_brief"), account)
+        save_setting("whitelist", data.get("whitelist"), account)
+        save_setting("website_url", data.get("website_url"), account)
+        save_setting("max_crawl_pages", data.get("max_crawl_pages"), account)
+        save_setting("additional_urls", data.get("additional_urls"), account)
+        save_setting("max_emails", data.get("max_emails"), account)
+        return jsonify({"saved": True})
 
-@app.route("/crawl", methods=["POST"])
+    return jsonify({
+        "owner_name": get_setting("owner_name", "", account),
+        "business_brief": get_setting("business_brief", "", account),
+        "whitelist": get_setting("whitelist", "", account),
+        "website_url": get_setting("website_url", "", account),
+        "max_crawl_pages": get_setting("max_crawl_pages", "10", account),
+        "additional_urls": get_setting("additional_urls", "", account),
+        "max_emails": get_setting("max_emails", "100", account),
+    })
+
+@app.route("/api/crawl", methods=["POST"])
 def crawl():
-    from crawler import crawl_website
     account = current_account()
     website_url = get_setting("website_url", "", account)
     max_pages = int(get_setting("max_crawl_pages", "10", account) or "10")
@@ -208,22 +200,28 @@ def crawl():
     if website_url:
         content = crawl_website(website_url, max_pages, additional_urls)
         save_website_content(account, content)
-    return redirect(url_for("settings", crawled=1))
+    return jsonify({"crawled": True})
+
+@app.route("/api/save_draft", methods=["POST"])
+def save_draft_edit():
+    from db import save_draft, get_draft
+    data = request.get_json()
+    gmail_id = data.get("gmail_id")
+    new_body = data.get("body")
+    existing = get_draft(gmail_id)
+    if existing and new_body:
+        save_draft(gmail_id, existing["sender"], existing["subject"], existing["body"], new_body, existing.get("thread_id", ""), existing.get("message_id", ""))
+    return jsonify({"saved": True})
+
+@app.route("/api/logout")
+def logout():
+    session.clear()
+    return jsonify({"logged_out": True})
 
 @app.route("/crawled-content")
 def crawled_content():
     content = get_website_content(current_account())
     return f"<pre>{content}</pre>"
-
-@app.route("/save_draft", methods=["POST"])
-def save_draft_edit():
-    from db import save_draft, get_draft
-    gmail_id = request.form.get("gmail_id")
-    new_body = request.form.get("body")
-    existing = get_draft(gmail_id)
-    if existing and new_body:
-        save_draft(gmail_id, existing["sender"], existing["subject"], existing["body"], new_body, existing.get("thread_id", ""), existing.get("message_id", ""))
-    return "", 204
 
 if __name__ == "__main__":
     init_db()
