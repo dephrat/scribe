@@ -14,9 +14,19 @@ CLIENT_SECRETS_FILE = os.getenv("GOOGLE_CLIENT_SECRETS", "credentials/credential
 
 def strip_html(text):
     soup = BeautifulSoup(text, "html.parser")
+    for tag in soup.find_all(['style', 'script']):
+        tag.decompose()
+    for a in soup.find_all('a'):
+        link_text = a.get_text(strip=True)
+        if link_text:
+            a.replace_with(link_text)
+        else:
+            a.replace_with('')
     return soup.get_text(separator="\n")
 
 def clean_body(text):
+    # Normalize Windows line endings
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
     # Remove numeric HTML entities (e.g. &#8199;)
     text = re.sub(r'&#\d+;', '', text)
     # Remove named HTML entities (e.g. &zwnj; &amp;)
@@ -24,8 +34,12 @@ def clean_body(text):
     # Remove quoted-printable artifacts (e.g. =20)
     text = re.sub(r'=\d{2}', '', text)
     # Collapse excessive newlines and spaces
-    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r'\n+', '\n', text)
     text = re.sub(r' {2,}', ' ', text)
+    # Remove lines that are only spaces
+    text = re.sub(r'\n +\n', '\n', text)
+    # Strip any remaining HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
     return text.strip()
 
 def get_oauth_flow(redirect_uri):
@@ -95,6 +109,9 @@ def get_new_emails(service, whitelist):
 
         body = clean_body(body)
 
+        date_val = headers.get("Date", "")
+        date_val = re.sub(r'\s*\(.*?\)\s*$', '', date_val).strip()
+
         emails.append({
             "gmail_id": msg["id"],
             "thread_id": msg_data["threadId"],
@@ -102,7 +119,7 @@ def get_new_emails(service, whitelist):
             "sender": headers.get("From", ""),
             "subject": headers.get("Subject", ""),
             "body": body,
-            "date": headers.get("Date", "")
+            "date": date_val
         })
 
     return emails

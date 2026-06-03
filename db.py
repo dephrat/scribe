@@ -53,12 +53,30 @@ def get_draft(gmail_id):
     conn.close()
     return dict(row) if row else None
 
-def save_draft(gmail_id, sender, subject, body, draft_reply, thread_id="", message_id="", date=""):
+def save_draft(gmail_id, sender, subject, body, draft_reply, thread_id="", message_id="", date="", status="ready"):
     conn = get_db()
     conn.execute("""
         INSERT OR REPLACE INTO emails (gmail_id, thread_id, message_id, sender, subject, body, draft_reply, date, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-    """, (gmail_id, thread_id, message_id, sender, subject, body, draft_reply, date))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (gmail_id, thread_id, message_id, sender, subject, body, draft_reply, date, status))
+    conn.commit()
+    conn.close()
+
+def save_email_pending(gmail_id, sender, subject, body, thread_id="", message_id="", date=""):
+    conn = get_db()
+    conn.execute("""
+        INSERT OR REPLACE INTO emails (gmail_id, thread_id, message_id, sender, subject, body, draft_reply, date, status)
+        VALUES (?, ?, ?, ?, ?, ?, '', ?, 'pending')
+    """, (gmail_id, thread_id, message_id, sender, subject, body, date))
+    conn.commit()
+    conn.close()
+
+def update_draft_status(gmail_id, status, draft_reply=None):
+    conn = get_db()
+    if draft_reply is not None:
+        conn.execute("UPDATE emails SET status = ?, draft_reply = ? WHERE gmail_id = ?", (status, draft_reply, gmail_id))
+    else:
+        conn.execute("UPDATE emails SET status = ? WHERE gmail_id = ?", (status, gmail_id))
     conn.commit()
     conn.close()
 
@@ -73,3 +91,7 @@ def save_website_content(account, content):
 
 def get_website_content(account):
     return get_setting("website_content", "", account)
+
+def get_website_crawled_at(account):
+    val = get_setting("website_crawled_at", None, account)
+    return float(val) if val else None

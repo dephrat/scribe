@@ -1,5 +1,6 @@
 import os
 import anthropic
+import time
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
@@ -23,11 +24,17 @@ You received an email from {sender} with subject "{subject}":
 
 Write a professional, friendly reply on behalf of the business owner. Keep it concise. Do not include a subject line, just the email body."""
 
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        temperature=0,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    return message.content[0].text
+    for attempt in range(3):
+        try:
+            message = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                temperature=0,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return message.content[0].text
+        except anthropic.RateLimitError:
+            if attempt < 2:
+                time.sleep(10)
+                continue
+            raise

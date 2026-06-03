@@ -1,10 +1,12 @@
 import os
+import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, redirect, url_for, session
+from flask import Flask, jsonify, request, redirect, url_for, session, Response, stream_with_context
 from google.auth.exceptions import RefreshError
 from crawler import crawl_website
-from db import init_db, get_setting, save_setting, delete_draft, get_draft, get_website_content, save_website_content
+from db import init_db, get_setting, save_setting, delete_draft, get_draft, get_website_content, save_website_content, save_email_pending, update_draft_status
 from gmail import get_oauth_flow, credentials_to_dict
 from flask_cors import CORS
 
@@ -14,6 +16,10 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
+
+# SSE client queues per account
+sse_queues = {}
+sse_lock = threading.Lock()
 
 def current_account():
     return session.get("account_email")
@@ -71,35 +77,110 @@ def fetch():
         return jsonify({"error": "not_connected"}), 401
 
     from gmail import get_gmail_service, get_new_emails
-    from ai import draft_reply
-    from db import save_draft
 
     service = get_gmail_service(session["credentials"])
     whitelist = [e.strip() for e in get_setting("whitelist", "", current_account()).split(",") if e.strip()]
-    business_brief = get_setting("business_brief", "", current_account())
-
     max_emails = int(get_setting("max_emails", "100", current_account()) or "100")
+
     emails = get_new_emails(service, whitelist)
     emails = emails[:max_emails]
 
-    content = get_website_content(current_account())
-    if content:
-        business_brief = business_brief + "\n\nWebsite content:\n" + content
-
-    def process_email(email):
+    gmail_ids = []
+    for email in emails:
         existing = get_draft(email["gmail_id"])
         if existing:
-            return existing["gmail_id"]
-        reply = draft_reply(email["body"], email["sender"], email["subject"], business_brief)
-        save_draft(email["gmail_id"], email["sender"], email["subject"], email["body"], reply, email["thread_id"], email["message_id"], email.get("date", ""))
-        return email["gmail_id"]
-
-    with ThreadPoolExecutor() as executor:
-        gmail_ids = list(executor.map(process_email, emails))
+            gmail_ids.append(email["gmail_id"])
+        else:
+            save_email_pending(
+                email["gmail_id"], email["sender"], email["subject"],
+                email["body"], email["thread_id"], email["message_id"], email.get("date", "")
+            )
+            gmail_ids.append(email["gmail_id"])
 
     session["drafted_email_ids"] = gmail_ids
     results = get_emails_from_db(gmail_ids)
     return jsonify({"emails": results})
+
+@app.route("/api/generate", methods=["POST"])
+def generate():
+    if not session.get("credentials"):
+        return jsonify({"error": "not_connected"}), 401
+
+    from ai import draft_reply
+
+    data = request.get_json()
+    gmail_ids = data.get("gmail_ids", [])
+    account = current_account()
+
+    business_brief = get_setting("business_brief", "", account)
+    content = get_website_content(account)
+    if content:
+        business_brief = business_brief + "\n\nWebsite content:\n" + content
+
+    def process_one(gmail_id):
+        existing = get_draft(gmail_id)
+        if not existing:
+            return
+        if existing.get("status") == "ready" and existing.get("draft_reply"):
+            return  # already has a draft, skip
+        update_draft_status(gmail_id, "generating")
+        try:
+            reply = draft_reply(existing["body"], existing["sender"], existing["subject"], business_brief)
+            update_draft_status(gmail_id, "ready", reply)
+        except Exception as e:
+            update_draft_status(gmail_id, "error")
+        # push SSE event
+        with sse_lock:
+            queue = sse_queues.get(account)
+        if queue is not None:
+            updated = get_draft(gmail_id)
+            queue.append(updated)
+
+    def run_generation():
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            executor.map(process_one, gmail_ids)
+        # signal done
+        with sse_lock:
+            queue = sse_queues.get(account)
+        if queue is not None:
+            queue.append({"done": True})
+
+    thread = threading.Thread(target=run_generation)
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({"started": True})
+
+@app.route("/api/stream")
+def stream():
+    if not session.get("credentials"):
+        return jsonify({"error": "not_connected"}), 401
+
+    account = current_account()
+
+    with sse_lock:
+        sse_queues[account] = []
+
+    @stream_with_context
+    def event_stream():
+        while True:
+            with sse_lock:
+                queue = sse_queues.get(account, [])
+                if queue:
+                    item = queue.pop(0)
+                    sse_queues[account] = queue
+                else:
+                    item = None
+            if item is not None:
+                yield f"data: {json.dumps(item)}\n\n"
+                if item.get("done"):
+                    break
+            else:
+                import time
+                time.sleep(0.5)
+
+    return Response(event_stream(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 @app.route("/api/send", methods=["POST"])
 def send():
@@ -160,10 +241,15 @@ def regenerate():
 
     existing = get_draft(gmail_id)
     if existing:
-        new_reply = draft_reply(existing["body"], existing["sender"], existing["subject"], business_brief)
-        save_draft(gmail_id, existing["sender"], existing["subject"], existing["body"], new_reply, existing.get("thread_id", ""), existing.get("message_id", ""))
-        updated = get_draft(gmail_id)
-        return jsonify({"email": updated})
+        update_draft_status(gmail_id, "generating")
+        try:
+            new_reply = draft_reply(existing["body"], existing["sender"], existing["subject"], business_brief)
+            update_draft_status(gmail_id, "ready", new_reply)
+            updated = get_draft(gmail_id)
+            return jsonify({"email": updated})
+        except Exception as e:
+            update_draft_status(gmail_id, "error")
+            return jsonify({"error": str(e)}), 500
 
     return jsonify({"error": "not_found"}), 404
 
@@ -171,8 +257,6 @@ def regenerate():
 def settings():
     account = current_account()
     if request.method == "POST":
-        if not account:
-            return jsonify({"error": "not_connected"}), 401
         data = request.get_json()
         save_setting("owner_name", data.get("owner_name"), account)
         save_setting("business_brief", data.get("business_brief"), account)
@@ -214,13 +298,18 @@ def save_draft_edit():
     new_body = data.get("body")
     existing = get_draft(gmail_id)
     if existing and new_body:
-        save_draft(gmail_id, existing["sender"], existing["subject"], existing["body"], new_body, existing.get("thread_id", ""), existing.get("message_id", ""))
+        save_draft(gmail_id, existing["sender"], existing["subject"], existing["body"], new_body, existing.get("thread_id", ""), existing.get("message_id", ""), existing.get("date", ""), "ready")
     return jsonify({"saved": True})
 
 @app.route("/api/logout")
 def logout():
     session.clear()
     return jsonify({"logged_out": True})
+
+@app.route("/crawled-content")
+def crawled_content():
+    content = get_website_content(current_account())
+    return f"<pre>{content}</pre>"
 
 if __name__ == "__main__":
     init_db()

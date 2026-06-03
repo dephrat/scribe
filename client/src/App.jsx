@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 const API = 'http://localhost:5001'
 
@@ -56,7 +56,6 @@ function Settings({ onBack }) {
       </div>
 
       <div style={styles.settingsLayout}>
-        {/* Sidebar */}
         <div style={styles.sidebar}>
           <h3 style={styles.sidebarTitle}>Settings</h3>
           {sections.map(s => (
@@ -73,7 +72,6 @@ function Settings({ onBack }) {
           ))}
         </div>
 
-        {/* Content */}
         <div style={styles.settingsContent}>
           {message && <div style={styles.successMsg}>{message}</div>}
 
@@ -178,10 +176,14 @@ function App() {
   const [editedBody, setEditedBody] = useState('')
   const [view, setView] = useState('dashboard')
   const [timezone, setTimezone] = useState('America/Toronto')
+  const eventSourceRef = useRef(null)
 
   function formatDate(dateStr, tz) {
+    if (!dateStr) return ''
     try {
-      return new Date(dateStr).toLocaleString('en-CA', {
+      const date = new Date(dateStr)
+      if (isNaN(date.getTime())) return dateStr
+      return date.toLocaleString('en-CA', {
         timeZone: tz,
         year: 'numeric', month: 'short', day: 'numeric',
         hour: '2-digit', minute: '2-digit'
@@ -191,8 +193,16 @@ function App() {
     }
   }
 
+  function displayBody(text) {
+    if (!text) return ''
+    return text.replace(/https?:\/\/\S+/g, '[link]')
+  }
+
   useEffect(() => {
     checkStatus()
+    return () => {
+      if (eventSourceRef.current) eventSourceRef.current.close()
+    }
   }, [])
 
   async function checkStatus() {
@@ -202,7 +212,7 @@ function App() {
       setConnected(data.connected)
       setOwnerName(data.owner_name)
       setEmails(data.emails)
-      
+
       const settingsRes = await fetch(`${API}/api/settings`, { credentials: 'include' })
       const settingsData = await settingsRes.json()
       setTimezone(settingsData.timezone || 'America/Toronto')
@@ -213,14 +223,53 @@ function App() {
     }
   }
 
+  function connectSSE(gmailIds) {
+    if (eventSourceRef.current) eventSourceRef.current.close()
+
+    const es = new EventSource(`${API}/api/stream`, { withCredentials: true })
+    eventSourceRef.current = es
+
+    es.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+      if (data.done) {
+        es.close()
+        return
+      }
+      setEmails(prev => prev.map(e =>
+        e.gmail_id === data.gmail_id ? { ...e, draft_reply: data.draft_reply, status: data.status } : e
+      ))
+    }
+
+    es.onerror = () => es.close()
+
+    // kick off generation
+    fetch(`${API}/api/generate`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gmail_ids: gmailIds })
+    })
+  }
+
   async function fetchEmails() {
     setFetching(true)
-    const res = await fetch(`${API}/api/fetch`, { credentials: 'include' })
-    const data = await res.json()
-    setEmails(data.emails)
-    setCurrentIndex(0)
-    setEditMode(false)
-    setFetching(false)
+    try {
+      const res = await fetch(`${API}/api/fetch`, { credentials: 'include' })
+      const data = await res.json()
+      setEmails(data.emails)
+      setCurrentIndex(0)
+      setEditMode(false)
+
+      const pendingIds = data.emails
+        .filter(e => !e.draft_reply || e.status === 'pending')
+        .map(e => e.gmail_id)
+
+      if (pendingIds.length > 0) {
+        connectSSE(pendingIds)
+      }
+    } finally {
+      setFetching(false)
+    }
   }
 
   async function sendEmail() {
@@ -239,7 +288,13 @@ function App() {
         message_id: email.message_id
       })
     })
-    nextEmail()
+    const updated = emails.filter((_, i) => i !== currentIndex)
+    setEmails(updated)
+    setEditMode(false)
+    setEditedBody('')
+    if (currentIndex >= updated.length) {
+      setCurrentIndex(Math.max(0, updated.length - 1))
+    }
   }
 
   async function dismissEmail() {
@@ -250,7 +305,13 @@ function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ gmail_id: email.gmail_id })
     })
-    nextEmail()
+    const updated = emails.filter((_, i) => i !== currentIndex)
+    setEmails(updated)
+    setEditMode(false)
+    setEditedBody('')
+    if (currentIndex >= updated.length) {
+      setCurrentIndex(Math.max(0, updated.length - 1))
+    }
   }
 
   async function regenerate() {
@@ -262,20 +323,10 @@ function App() {
       body: JSON.stringify({ gmail_id: email.gmail_id })
     })
     const data = await res.json()
-    const updated = emails.map((e, i) => i === currentIndex ? { ...e, draft_reply: data.email.draft_reply } : e)
-    setEmails(updated)
+    setEmails(prev => prev.map((e, i) =>
+      i === currentIndex ? { ...e, draft_reply: data.email.draft_reply, status: data.email.status } : e
+    ))
     setEditMode(false)
-  }
-
-  function nextEmail() {
-    setEditMode(false)
-    setEditedBody('')
-    if (currentIndex < emails.length - 1) {
-      setCurrentIndex(currentIndex + 1)
-    } else {
-      setEmails([])
-      setCurrentIndex(0)
-    }
   }
 
   function startEdit() {
@@ -284,7 +335,6 @@ function App() {
   }
 
   if (loading) return <div style={styles.center}>Loading...</div>
-
   if (view === 'settings') return <Settings onBack={() => { setView('dashboard'); checkStatus() }} />
 
   if (!connected) return (
@@ -294,9 +344,10 @@ function App() {
     </div>
   )
 
-  if (fetching) return <div style={styles.center}>Fetching & generating drafts...</div>
+  if (fetching) return <div style={styles.center}>Fetching emails...</div>
 
   const email = emails[currentIndex]
+  const isGenerating = email && (!email.draft_reply || email.status === 'pending' || email.status === 'generating')
 
   return (
     <div style={styles.container}>
@@ -316,19 +367,34 @@ function App() {
         </div>
       ) : (
         <div style={styles.card}>
-          <div style={styles.progress}>{currentIndex + 1} of {emails.length}</div>
+          <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8}}>
+            <button
+              onClick={() => { setEditMode(false); setEditedBody(''); setCurrentIndex(currentIndex - 1) }}
+              disabled={currentIndex === 0}
+              style={{...styles.navBtn, opacity: currentIndex === 0 ? 0.3 : 1}}
+            >←</button>
+            <div style={styles.progress}>{currentIndex + 1} of {emails.length}</div>
+            <button
+              onClick={() => { setEditMode(false); setEditedBody(''); setCurrentIndex(currentIndex + 1) }}
+              disabled={currentIndex === emails.length - 1}
+              style={{...styles.navBtn, opacity: currentIndex === emails.length - 1 ? 0.3 : 1}}
+            >→</button>
+          </div>
+
           <h2 style={styles.subject}>{email.subject}</h2>
           <div style={styles.meta}>From: {email.sender}</div>
           <div style={styles.meta}>{formatDate(email.date, timezone)}</div>
 
           <div style={styles.section}>
             <div style={styles.sectionLabel}>Original</div>
-            <div style={styles.original}>{email.body}</div>
+            <div style={styles.original}>{displayBody(email.body)}</div>
           </div>
 
           <div style={styles.section}>
             <div style={styles.sectionLabel}>Draft Reply</div>
-            {editMode ? (
+            {isGenerating ? (
+              <div style={{...styles.draft, color: '#999', fontStyle: 'italic'}}>Generating...</div>
+            ) : editMode ? (
               <textarea
                 style={styles.textarea}
                 value={editedBody}
@@ -341,9 +407,9 @@ function App() {
           </div>
 
           <div style={styles.actions}>
-            <button onClick={sendEmail} style={styles.approveBtn}>Approve & Send</button>
+            <button onClick={sendEmail} disabled={isGenerating} style={{...styles.approveBtn, opacity: isGenerating ? 0.4 : 1}}>Approve & Send</button>
             <button onClick={dismissEmail} style={styles.dismissBtn}>Dismiss</button>
-            <button onClick={regenerate} style={styles.regenBtn}>Regenerate</button>
+            <button onClick={regenerate} disabled={isGenerating} style={{...styles.regenBtn, opacity: isGenerating ? 0.4 : 1}}>Regenerate</button>
             {editMode ? (
               <button onClick={async () => {
                 const updated = emails.map((e, i) => i === currentIndex ? { ...e, draft_reply: editedBody } : e)
@@ -357,7 +423,7 @@ function App() {
                 })
               }} style={styles.editBtn}>Done</button>
             ) : (
-              <button onClick={startEdit} style={styles.editBtn}>Edit</button>
+              <button onClick={startEdit} disabled={isGenerating} style={{...styles.editBtn, opacity: isGenerating ? 0.4 : 1}}>Edit</button>
             )}
           </div>
         </div>
@@ -368,7 +434,7 @@ function App() {
 
 const styles = {
   container: { fontFamily: 'Arial, sans-serif', width: 900, margin: '0 auto', padding: '20px', boxSizing: 'border-box' },
-  topBar: { display: 'flex', alignItems: 'center', gap: 16, marginBottom: 32, borderBottom: '1px solid #eee', paddingBottom: 16 },
+  topBar: { display: 'flex', alignItems: 'center', gap: 16, marginBottom: 32, borderBottom: '1px solid #eee', paddingBottom: 16, width: '100%', boxSizing: 'border-box' },
   logo: { fontWeight: 'bold', fontSize: 20, marginRight: 'auto' },
   greeting: { color: '#666', fontSize: 14 },
   topActions: { display: 'flex', gap: 12, alignItems: 'center' },
@@ -382,8 +448,8 @@ const styles = {
   meta: { color: '#666', fontSize: 13, marginBottom: 4 },
   section: { marginTop: 20 },
   sectionLabel: { fontSize: 12, fontWeight: 'bold', color: '#999', textTransform: 'uppercase', marginBottom: 8 },
-  original: { background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 16, whiteSpace: 'pre-wrap', fontSize: 14 },
-  draft: { background: '#f9f9f9', border: '1px solid #ddd', borderRadius: 6, padding: 16, whiteSpace: 'pre-wrap', fontSize: 14 },
+  original: { background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 16, whiteSpace: 'pre-wrap', fontSize: 14, wordBreak: 'break-all' },
+  draft: { background: '#f9f9f9', border: '1px solid #ddd', borderRadius: 6, padding: 16, whiteSpace: 'pre-wrap', fontSize: 14, wordBreak: 'break-all' },
   textarea: { width: '100%', minHeight: 150, padding: 16, background: '#f9f9f9', border: '1px solid #ddd', borderRadius: 6, fontFamily: 'Arial, sans-serif', fontSize: 14, boxSizing: 'border-box', resize: 'vertical' },
   textarea2: { width: '100%', minHeight: 120, padding: 10, border: '1px solid #ddd', borderRadius: 4, fontFamily: 'Arial, sans-serif', fontSize: 14, boxSizing: 'border-box', resize: 'vertical' },
   actions: { display: 'flex', gap: 10, marginTop: 20 },
@@ -391,6 +457,7 @@ const styles = {
   dismissBtn: { background: '#dc3545', color: 'white', border: 'none', borderRadius: 4, padding: '10px 20px', cursor: 'pointer', fontSize: 15 },
   regenBtn: { background: '#ffc107', color: 'black', border: 'none', borderRadius: 4, padding: '10px 20px', cursor: 'pointer', fontSize: 15 },
   editBtn: { background: '#6c757d', color: 'white', border: 'none', borderRadius: 4, padding: '10px 20px', cursor: 'pointer', fontSize: 15 },
+  navBtn: { background: 'none', border: '1px solid #ddd', borderRadius: 4, padding: '4px 12px', cursor: 'pointer', fontSize: 18 },
   field: { marginBottom: 24 },
   label: { fontWeight: 'bold', display: 'block', marginBottom: 4 },
   hint: { color: '#666', fontSize: 13, margin: '0 0 8px 0' },
