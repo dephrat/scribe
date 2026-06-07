@@ -229,7 +229,13 @@ function App() {
   useEffect(() => {
     function handleKey(e) {
       if (!email) return
-      if (editMode) return
+      if (editMode) {
+        if (e.key === 'Escape') {
+          setEditMode(false)
+          setEditedBody('')
+        }
+        return
+      }
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
 
       // Arrows always work
@@ -258,11 +264,18 @@ function App() {
           startEdit()
         }
       } else if (e.key === 'a' || e.key === 'A') {
-        if (!isGenerating) setConfirmAction('send')
+        if (!isGenerating) {
+          setConfirmAction('send')
+          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+        }
       } else if (e.key === 'd' || e.key === 'D') {
         setConfirmAction('dismiss')
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
       } else if (e.key === 'r' || e.key === 'R') {
-        if (!isGenerating && !regenerating.has(email.gmail_id)) setConfirmAction('regen')
+        if (!isGenerating && !regenerating.has(email.gmail_id)) {
+          setConfirmAction('regen')
+          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+        }
       }
     }
 
