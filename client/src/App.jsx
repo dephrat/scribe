@@ -43,16 +43,27 @@ function Settings({ onBack }) {
 
   const sections = [
     { id: 'business', label: 'Business Info' },
-    { id: 'crawling', label: 'Web Crawling' },
     { id: 'fetching', label: 'Fetching' },
     { id: 'display', label: 'Email Display' },
+    { id: 'crawling', label: 'Web Crawling' },
   ]
 
   return (
     <div style={styles.settingsContainer}>
       <div style={styles.topBar}>
         <span style={styles.logo}>Scribe</span>
-        <button onClick={onBack} style={styles.linkBtn}>← Back to Dashboard</button>
+        <button 
+          onClick={() => {
+            if (crawling) {
+              if (window.confirm('Crawl is in progress. Leave anyway?')) onBack()
+            } else {
+              onBack()
+            }
+          }}
+          style={styles.linkBtn}
+        >
+          ← Back to Dashboard
+        </button>
       </div>
 
       <div style={styles.settingsLayout}>
@@ -70,10 +81,12 @@ function Settings({ onBack }) {
               {s.label}
             </button>
           ))}
+          <button onClick={save} style={{...styles.fetchBtn, marginTop: 24, width: '100%'}}>Save</button>
+          {message === '✓ Settings saved!' && <div style={{...styles.successMsg, marginTop: 8}}>{message}</div>}
         </div>
 
         <div style={styles.settingsContent}>
-          {message && <div style={styles.successMsg}>{message}</div>}
+          {message === '✓ Website crawled!' && <div style={styles.successMsg}>{message}</div>}
 
           {activeSection === 'business' && (
             <>
@@ -88,13 +101,15 @@ function Settings({ onBack }) {
                 <p style={styles.hint}>Describe your business, your name, and the tone you want replies to have.</p>
                 <textarea style={styles.textarea2} value={form.business_brief} onChange={e => setForm({...form, business_brief: e.target.value})} />
               </div>
-              <button onClick={save} style={styles.fetchBtn}>Save</button>
             </>
           )}
 
           {activeSection === 'crawling' && (
             <>
               <h3 style={styles.sectionHeader}>Web Crawling</h3>
+              <p style={{color: '#555', fontSize: 14, marginBottom: 24, lineHeight: 1.6}}>
+                Scribe reads your website so it knows what your business does. This helps it write better, more accurate replies.
+              </p>
               <div style={styles.field}>
                 <label style={styles.label}>Website URL</label>
                 <p style={styles.hint}>Your business website. Click "Crawl Now" to fetch the latest content.</p>
@@ -110,12 +125,9 @@ function Settings({ onBack }) {
                 <p style={styles.hint}>Total pages to crawl across all URLs.</p>
                 <input style={styles.input} value={form.max_crawl_pages} onChange={e => setForm({...form, max_crawl_pages: e.target.value})} />
               </div>
-              <div style={styles.actions}>
-                <button onClick={save} style={styles.fetchBtn}>Save</button>
-                <button onClick={crawl} style={styles.approveBtn} disabled={crawling}>
-                  {crawling ? 'Crawling...' : 'Crawl Now'}
-                </button>
-              </div>
+              <button onClick={crawl} style={styles.approveBtn} disabled={crawling}>
+                {crawling ? 'Crawling...' : 'Crawl Now'}
+              </button>
             </>
           )}
 
@@ -128,11 +140,15 @@ function Settings({ onBack }) {
                 <input style={styles.input} value={form.whitelist} onChange={e => setForm({...form, whitelist: e.target.value})} />
               </div>
               <div style={styles.field}>
+                <label style={styles.label}>Blacklist</label>
+                <p style={styles.hint}>Comma-separated email addresses to never fetch. Useful for blocking newsletters and spam.</p>
+                <input style={styles.input} value={form.blacklist} onChange={e => setForm({...form, blacklist: e.target.value})} />
+              </div>
+              <div style={styles.field}>
                 <label style={styles.label}>Max Emails to Fetch</label>
                 <p style={styles.hint}>Maximum number of emails to fetch at once. Defaults to 100 if left blank.</p>
                 <input style={styles.input} value={form.max_emails} onChange={e => setForm({...form, max_emails: e.target.value})} />
               </div>
-              <button onClick={save} style={styles.fetchBtn}>Save</button>
             </>
           )}
 
@@ -156,7 +172,6 @@ function Settings({ onBack }) {
                   <option value="UTC">UTC</option>
                 </select>
               </div>
-              <button onClick={save} style={styles.fetchBtn}>Save</button>
             </>
           )}
         </div>
@@ -176,7 +191,11 @@ function App() {
   const [editedBody, setEditedBody] = useState('')
   const [view, setView] = useState('dashboard')
   const [timezone, setTimezone] = useState('America/Toronto')
+  const [regenerating, setRegenerating] = useState(new Set())
+  const [confirmAction, setConfirmAction] = useState(null) // 'send' | 'dismiss' | 'regen'
   const eventSourceRef = useRef(null)
+  const email = emails[currentIndex]
+  const isGenerating = email && (!email.draft_reply || email.status === 'pending' || email.status === 'generating')
 
   function formatDate(dateStr, tz) {
     if (!dateStr) return ''
@@ -204,6 +223,44 @@ function App() {
       if (eventSourceRef.current) eventSourceRef.current.close()
     }
   }, [])
+
+  useEffect(() => {
+    function handleKey(e) {
+      if (!email) return
+      if (editMode) return
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+
+      if (confirmAction) {
+        if (e.key === 'Enter') {
+          executeAction(confirmAction)
+          setConfirmAction(null)
+        } else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') {
+          setConfirmAction(null)
+        }
+        return
+      }
+
+      if (e.key === 'ArrowLeft' && currentIndex > 0) {
+        setEditMode(false); setEditedBody(''); setCurrentIndex(currentIndex - 1)
+      } else if (e.key === 'ArrowRight' && currentIndex < emails.length - 1) {
+        setEditMode(false); setEditedBody(''); setCurrentIndex(currentIndex + 1)
+      } else if (e.key === 'e' || e.key === 'E') {
+        if (!isGenerating) {
+          e.preventDefault()
+          startEdit()
+        }
+      } else if (e.key === 'a' || e.key === 'A') {
+        if (!isGenerating) setConfirmAction('send')
+      } else if (e.key === 'd' || e.key === 'D') {
+        setConfirmAction('dismiss')
+      } else if (e.key === 'r' || e.key === 'R') {
+        if (!isGenerating && !regenerating.has(email.gmail_id)) setConfirmAction('regen')
+      }
+    }
+
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [email, editMode, confirmAction, currentIndex, emails, isGenerating, regenerating])
 
   async function checkStatus() {
     try {
@@ -316,6 +373,7 @@ function App() {
 
   async function regenerate() {
     const email = emails[currentIndex]
+    setRegenerating(prev => new Set(prev).add(email.gmail_id))
     const res = await fetch(`${API}/api/regenerate`, {
       method: 'POST',
       credentials: 'include',
@@ -326,7 +384,18 @@ function App() {
     setEmails(prev => prev.map((e, i) =>
       i === currentIndex ? { ...e, draft_reply: data.email.draft_reply, status: data.email.status } : e
     ))
+    setRegenerating(prev => {
+      const next = new Set(prev)
+      next.delete(email.gmail_id)
+      return next
+    })
     setEditMode(false)
+  }
+
+  function executeAction(action) {
+    if (action === 'send') sendEmail()
+    else if (action === 'dismiss') dismissEmail()
+    else if (action === 'regen') regenerate()
   }
 
   function startEdit() {
@@ -340,14 +409,18 @@ function App() {
   if (!connected) return (
     <div style={styles.center}>
       <h1>Scribe</h1>
-      <a href={`${API}/connect`} style={styles.connectBtn}>Connect Gmail</a>
+      <button 
+        onClick={() => window.location.href = `${API}/connect`}
+        onMouseDown={e => e.currentTarget.style.transform = 'scale(0.97)'}
+        onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
+        style={styles.connectBtn}
+      >
+        Connect Gmail
+      </button>
     </div>
   )
 
   if (fetching) return <div style={styles.center}>Fetching emails...</div>
-
-  const email = emails[currentIndex]
-  const isGenerating = email && (!email.draft_reply || email.status === 'pending' || email.status === 'generating')
 
   return (
     <div style={styles.container}>
@@ -409,7 +482,14 @@ function App() {
           <div style={styles.actions}>
             <button onClick={sendEmail} disabled={isGenerating} style={{...styles.approveBtn, opacity: isGenerating ? 0.4 : 1}}>Approve & Send</button>
             <button onClick={dismissEmail} style={styles.dismissBtn}>Dismiss</button>
-            <button onClick={regenerate} disabled={isGenerating} style={{...styles.regenBtn, opacity: isGenerating ? 0.4 : 1}}>Regenerate</button>
+            <button 
+              onClick={regenerate} 
+              disabled={isGenerating || regenerating.has(email.gmail_id)} 
+              style={{...styles.regenBtn, opacity: (isGenerating || regenerating.has(email.gmail_id)) ? 0.4 : 1}}
+            >
+              {regenerating.has(email.gmail_id) ? 'Regenerating...' : 'Regenerate'}
+            </button>
+            
             {editMode ? (
               <button onClick={async () => {
                 const updated = emails.map((e, i) => i === currentIndex ? { ...e, draft_reply: editedBody } : e)
@@ -426,6 +506,23 @@ function App() {
               <button onClick={startEdit} disabled={isGenerating} style={{...styles.editBtn, opacity: isGenerating ? 0.4 : 1}}>Edit</button>
             )}
           </div>
+          
+          {confirmAction && (
+            <div style={styles.confirmBar}>
+              <span style={{fontSize: 14}}>
+                {confirmAction === 'send' ? 'Approve & send this email?' :
+                confirmAction === 'dismiss' ? 'Dismiss this email?' :
+                'Regenerate draft?'}
+              </span>
+              <button onClick={() => { executeAction(confirmAction); setConfirmAction(null) }} style={styles.approveBtn}>
+                Yes (Enter)
+              </button>
+              <button onClick={() => setConfirmAction(null)} style={styles.dismissBtn}>
+                No (N)
+              </button>
+            </div>
+          )}
+
         </div>
       )}
     </div>
@@ -441,15 +538,15 @@ const styles = {
   fetchBtn: { background: '#007bff', color: 'white', border: 'none', borderRadius: 4, padding: '8px 16px', cursor: 'pointer' },
   linkBtn: { background: 'none', border: 'none', color: '#007bff', cursor: 'pointer', fontSize: 14, padding: 0 },
   center: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80vh', gap: 16 },
-  connectBtn: { background: '#28a745', color: 'white', padding: '12px 24px', borderRadius: 6, textDecoration: 'none', fontSize: 16 },
+  connectBtn: { background: '#28a745', color: 'white', padding: '12px 24px', borderRadius: 6, fontSize: 16, cursor: 'pointer', border: 'none', outline: 'none' },
   card: { background: 'white', border: '1px solid #ddd', borderRadius: 12, padding: 32 },
   progress: { color: '#999', fontSize: 13, marginBottom: 8 },
   subject: { margin: '0 0 4px 0' },
   meta: { color: '#666', fontSize: 13, marginBottom: 4 },
   section: { marginTop: 20 },
   sectionLabel: { fontSize: 12, fontWeight: 'bold', color: '#999', textTransform: 'uppercase', marginBottom: 8 },
-  original: { background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 16, whiteSpace: 'pre-wrap', fontSize: 14, wordBreak: 'break-all' },
-  draft: { background: '#f9f9f9', border: '1px solid #ddd', borderRadius: 6, padding: 16, whiteSpace: 'pre-wrap', fontSize: 14, wordBreak: 'break-all' },
+  original: { background: '#fff', border: '1px solid #eee', borderRadius: 6, padding: 16, whiteSpace: 'pre-wrap', fontSize: 14, wordBreak: 'break-all', textAlign: 'left' },
+  draft: { background: '#f9f9f9', border: '1px solid #ddd', borderRadius: 6, padding: 16, whiteSpace: 'pre-wrap', fontSize: 14, wordBreak: 'break-all', textAlign: 'left' },
   textarea: { width: '100%', minHeight: 150, padding: 16, background: '#f9f9f9', border: '1px solid #ddd', borderRadius: 6, fontFamily: 'Arial, sans-serif', fontSize: 14, boxSizing: 'border-box', resize: 'vertical' },
   textarea2: { width: '100%', minHeight: 120, padding: 10, border: '1px solid #ddd', borderRadius: 4, fontFamily: 'Arial, sans-serif', fontSize: 14, boxSizing: 'border-box', resize: 'vertical' },
   actions: { display: 'flex', gap: 10, marginTop: 20 },
@@ -473,6 +570,7 @@ const styles = {
   settingsLayout: { display: 'grid', gridTemplateColumns: '180px 1fr', gap: 32, marginTop: 16 },
   sidebar: { width: 180 },
   settingsContent: { minWidth: 0 },
+  confirmBar: { marginTop: 20, padding: 16, background: '#f0f4ff', border: '1px solid #c7d7ff', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 12 },
 }
 
 export default App

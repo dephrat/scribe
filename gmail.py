@@ -33,8 +33,8 @@ def clean_body(text):
     text = re.sub(r'&[a-z]+;', '', text)
     # Remove quoted-printable artifacts (e.g. =20)
     text = re.sub(r'=\d{2}', '', text)
-    # Collapse excessive newlines and spaces
-    text = re.sub(r'\n+', '\n', text)
+    # Collapse 3+ newlines to 2 (preserve paragraph breaks)
+    text = re.sub(r'\n{3,}', '\n\n', text)
     text = re.sub(r' {2,}', ' ', text)
     # Remove lines that are only spaces
     text = re.sub(r'\n +\n', '\n', text)
@@ -71,15 +71,17 @@ def get_gmail_service(credentials_dict):
     )
     return build("gmail", "v1", credentials=creds)
 
-def get_new_emails(service, whitelist):
-    if whitelist:
-        query = " OR ".join([f"from:{addr}" for addr in whitelist])
-        query += " -label:ai-employee-review in:inbox"
+def get_new_emails(service, whitelist, max_emails=100):
+    query = " OR ".join([f"from:{addr}" for addr in whitelist]) if whitelist else ""
+    if query:
+        query += " -label:needs-manual-review in:inbox"
     else:
-        query = "-label:ai-employee-review in:inbox"
+        query = "-label:needs-manual-review in:inbox"
+    
     result = service.users().messages().list(
         userId="me",
-        q=query
+        q=query,
+        maxResults=max_emails
     ).execute()
 
     messages = result.get("messages", [])

@@ -16,6 +16,8 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = False
 
 # SSE client queues per account
 sse_queues = {}
@@ -82,8 +84,11 @@ def fetch():
     whitelist = [e.strip() for e in get_setting("whitelist", "", current_account()).split(",") if e.strip()]
     max_emails = int(get_setting("max_emails", "100", current_account()) or "100")
 
-    emails = get_new_emails(service, whitelist)
-    emails = emails[:max_emails]
+    emails = get_new_emails(service, whitelist, max_emails)
+
+    blacklist = [e.strip().lower() for e in get_setting("blacklist", "", current_account()).split(",") if e.strip()]
+    if blacklist:
+        emails = [e for e in emails if not any(b in e["sender"].lower() for b in blacklist)]
 
     gmail_ids = []
     for email in emails:
@@ -207,14 +212,15 @@ def dismiss():
     if not session.get("credentials"):
         return jsonify({"error": "not_connected"}), 401
 
-    from gmail import get_gmail_service, label_email
+    from gmail import get_gmail_service, label_email, archive_email
 
     service = get_gmail_service(session["credentials"])
     data = request.get_json()
     gmail_id = data.get("gmail_id")
 
     if gmail_id:
-        label_email(service, gmail_id, "ai-employee-review")
+        label_email(service, gmail_id, "needs-manual-review")
+        archive_email(service, gmail_id)
         delete_draft(gmail_id)
 
     ids = session.get("drafted_email_ids", [])
@@ -266,6 +272,7 @@ def settings():
         save_setting("additional_urls", data.get("additional_urls"), account)
         save_setting("max_emails", data.get("max_emails"), account)
         save_setting("timezone", data.get("timezone"), account)
+        save_setting("blacklist", data.get("blacklist"), account)
         return jsonify({"saved": True})
 
     return jsonify({
@@ -277,6 +284,7 @@ def settings():
         "additional_urls": get_setting("additional_urls", "", account),
         "max_emails": get_setting("max_emails", "100", account),
         "timezone": get_setting("timezone", "America/Toronto", account),
+        "blacklist": get_setting("blacklist", "", account),
     })
 
 @app.route("/api/crawl", methods=["POST"])
