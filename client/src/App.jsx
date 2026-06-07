@@ -43,9 +43,9 @@ function Settings({ onBack }) {
 
   const sections = [
     { id: 'business', label: 'Business Info' },
+    { id: 'crawling', label: 'Web Crawling' },
     { id: 'fetching', label: 'Fetching' },
     { id: 'display', label: 'Email Display' },
-    { id: 'crawling', label: 'Web Crawling' },
   ]
 
   return (
@@ -193,7 +193,9 @@ function App() {
   const [timezone, setTimezone] = useState('America/Toronto')
   const [regenerating, setRegenerating] = useState(new Set())
   const [confirmAction, setConfirmAction] = useState(null) // 'send' | 'dismiss' | 'regen'
+  const [notification, setNotification] = useState(null)
   const eventSourceRef = useRef(null)
+  const notificationTimerRef = useRef(null)
   const email = emails[currentIndex]
   const isGenerating = email && (!email.draft_reply || email.status === 'pending' || email.status === 'generating')
 
@@ -230,21 +232,27 @@ function App() {
       if (editMode) return
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
 
+      // Arrows always work
+      if (e.key === 'ArrowLeft' && currentIndex > 0) {
+        setEditMode(false); setEditedBody(''); setConfirmAction(null); setCurrentIndex(currentIndex - 1)
+        return
+      } else if (e.key === 'ArrowRight' && currentIndex < emails.length - 1) {
+        setEditMode(false); setEditedBody(''); setConfirmAction(null); setCurrentIndex(currentIndex + 1)
+        return
+      }
+
       if (confirmAction) {
         if (e.key === 'Enter') {
-          executeAction(confirmAction)
+          const action = confirmAction
           setConfirmAction(null)
+          executeAction(action)
         } else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') {
           setConfirmAction(null)
         }
         return
       }
 
-      if (e.key === 'ArrowLeft' && currentIndex > 0) {
-        setEditMode(false); setEditedBody(''); setCurrentIndex(currentIndex - 1)
-      } else if (e.key === 'ArrowRight' && currentIndex < emails.length - 1) {
-        setEditMode(false); setEditedBody(''); setCurrentIndex(currentIndex + 1)
-      } else if (e.key === 'e' || e.key === 'E') {
+      if (e.key === 'e' || e.key === 'E') {
         if (!isGenerating) {
           e.preventDefault()
           startEdit()
@@ -329,10 +337,28 @@ function App() {
     }
   }
 
+  async function regenerateAll() {
+    const res = await fetch(`${API}/api/regenerate_all`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    const data = await res.json()
+    setEmails(data.emails)
+    setCurrentIndex(0)
+    setEditMode(false)
+    setConfirmAction(null)
+
+    const pendingIds = data.emails.map(e => e.gmail_id)
+    if (pendingIds.length > 0) {
+      connectSSE(pendingIds)
+    }
+  }
+
   async function sendEmail() {
     const email = emails[currentIndex]
     const body = editMode ? editedBody : email.draft_reply
-    await fetch(`${API}/api/send`, {
+    const res = await fetch(`${API}/api/send`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -345,30 +371,32 @@ function App() {
         message_id: email.message_id
       })
     })
+    if (res.status === 404) {
+      showNotification('This email no longer exists in Gmail. Your inbox may be out of date — try fetching again.')
+    }
     const updated = emails.filter((_, i) => i !== currentIndex)
     setEmails(updated)
     setEditMode(false)
     setEditedBody('')
-    if (currentIndex >= updated.length) {
-      setCurrentIndex(Math.max(0, updated.length - 1))
-    }
+    if (currentIndex >= updated.length) setCurrentIndex(Math.max(0, updated.length - 1))
   }
 
   async function dismissEmail() {
     const email = emails[currentIndex]
-    await fetch(`${API}/api/dismiss`, {
+    const res = await fetch(`${API}/api/dismiss`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ gmail_id: email.gmail_id })
     })
+    if (res.status === 404) {
+      showNotification('This email no longer exists in Gmail. Your inbox may be out of date — try fetching again.')
+    }
     const updated = emails.filter((_, i) => i !== currentIndex)
     setEmails(updated)
     setEditMode(false)
     setEditedBody('')
-    if (currentIndex >= updated.length) {
-      setCurrentIndex(Math.max(0, updated.length - 1))
-    }
+    if (currentIndex >= updated.length) setCurrentIndex(Math.max(0, updated.length - 1))
   }
 
   async function regenerate() {
@@ -403,6 +431,12 @@ function App() {
     setEditMode(true)
   }
 
+  function showNotification(msg) {
+    if (notificationTimerRef.current) clearTimeout(notificationTimerRef.current)
+    setNotification(msg)
+    notificationTimerRef.current = setTimeout(() => setNotification(null), 5000)
+  }
+
   if (loading) return <div style={styles.center}>Loading...</div>
   if (view === 'settings') return <Settings onBack={() => { setView('dashboard'); checkStatus() }} />
 
@@ -429,6 +463,7 @@ function App() {
         {ownerName && <span style={styles.greeting}>Hi, {ownerName}</span>}
         <div style={styles.topActions}>
           <button onClick={fetchEmails} style={styles.fetchBtn}>Fetch Emails</button>
+          <button onClick={regenerateAll} style={{...styles.fetchBtn, background: '#6c757d'}}>Regenerate All</button>
           <button onClick={() => setView('settings')} style={styles.linkBtn}>Settings</button>
           <button onClick={async () => { await fetch(`${API}/api/logout`, { credentials: 'include' }); setConnected(false) }} style={styles.linkBtn}>Logout</button>
         </div>
@@ -442,13 +477,13 @@ function App() {
         <div style={styles.card}>
           <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8}}>
             <button
-              onClick={() => { setEditMode(false); setEditedBody(''); setCurrentIndex(currentIndex - 1) }}
+              onClick={() => { setEditMode(false); setEditedBody(''); setConfirmAction(null); setCurrentIndex(currentIndex - 1) }}
               disabled={currentIndex === 0}
               style={{...styles.navBtn, opacity: currentIndex === 0 ? 0.3 : 1}}
             >←</button>
             <div style={styles.progress}>{currentIndex + 1} of {emails.length}</div>
             <button
-              onClick={() => { setEditMode(false); setEditedBody(''); setCurrentIndex(currentIndex + 1) }}
+              onClick={() => { setEditMode(false); setEditedBody(''); setConfirmAction(null); setCurrentIndex(currentIndex + 1) }}
               disabled={currentIndex === emails.length - 1}
               style={{...styles.navBtn, opacity: currentIndex === emails.length - 1 ? 0.3 : 1}}
             >→</button>
@@ -479,47 +514,52 @@ function App() {
             )}
           </div>
 
-          <div style={styles.actions}>
-            <button onClick={sendEmail} disabled={isGenerating} style={{...styles.approveBtn, opacity: isGenerating ? 0.4 : 1}}>Approve & Send</button>
-            <button onClick={dismissEmail} style={styles.dismissBtn}>Dismiss</button>
-            <button 
-              onClick={regenerate} 
-              disabled={isGenerating || regenerating.has(email.gmail_id)} 
-              style={{...styles.regenBtn, opacity: (isGenerating || regenerating.has(email.gmail_id)) ? 0.4 : 1}}
-            >
-              {regenerating.has(email.gmail_id) ? 'Regenerating...' : 'Regenerate'}
-            </button>
-            
-            {editMode ? (
-              <button onClick={async () => {
-                const updated = emails.map((e, i) => i === currentIndex ? { ...e, draft_reply: editedBody } : e)
-                setEmails(updated)
-                setEditMode(false)
-                await fetch(`${API}/api/save_draft`, {
-                  method: 'POST',
-                  credentials: 'include',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ gmail_id: email.gmail_id, body: editedBody })
-                })
-              }} style={styles.editBtn}>Done</button>
-            ) : (
-              <button onClick={startEdit} disabled={isGenerating} style={{...styles.editBtn, opacity: isGenerating ? 0.4 : 1}}>Edit</button>
-            )}
-          </div>
-          
-          {confirmAction && (
+          {notification && (
+            <div style={styles.notification}>
+              {notification}
+            </div>
+          )}
+
+          {confirmAction ? (
             <div style={styles.confirmBar}>
               <span style={{fontSize: 14}}>
                 {confirmAction === 'send' ? 'Approve & send this email?' :
                 confirmAction === 'dismiss' ? 'Dismiss this email?' :
                 'Regenerate draft?'}
               </span>
-              <button onClick={() => { executeAction(confirmAction); setConfirmAction(null) }} style={styles.approveBtn}>
+              <button onClick={() => { const action = confirmAction; setConfirmAction(null); executeAction(action) }} style={styles.approveBtn}>
                 Yes (Enter)
               </button>
               <button onClick={() => setConfirmAction(null)} style={styles.dismissBtn}>
                 No (N)
               </button>
+            </div>
+          ) : (
+            <div style={styles.actions}>
+              <button onClick={() => setConfirmAction('send')} disabled={isGenerating} style={{...styles.approveBtn, opacity: isGenerating ? 0.4 : 1}}>Approve & Send</button>
+              <button onClick={() => setConfirmAction('dismiss')} style={styles.dismissBtn}>Dismiss</button>
+              <button
+                onClick={() => setConfirmAction('regen')}
+                disabled={isGenerating || regenerating.has(email.gmail_id)}
+                style={{...styles.regenBtn, opacity: (isGenerating || regenerating.has(email.gmail_id)) ? 0.4 : 1}}
+              >
+                {regenerating.has(email.gmail_id) ? 'Regenerating...' : 'Regenerate'}
+              </button>
+              {editMode ? (
+                <button onClick={async () => {
+                  const updated = emails.map((e, i) => i === currentIndex ? { ...e, draft_reply: editedBody } : e)
+                  setEmails(updated)
+                  setEditMode(false)
+                  await fetch(`${API}/api/save_draft`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gmail_id: email.gmail_id, body: editedBody })
+                  })
+                }} style={styles.editBtn}>Done</button>
+              ) : (
+                <button onClick={startEdit} disabled={isGenerating} style={{...styles.editBtn, opacity: isGenerating ? 0.4 : 1}}>Edit</button>
+              )}
             </div>
           )}
 
@@ -571,6 +611,7 @@ const styles = {
   sidebar: { width: 180 },
   settingsContent: { minWidth: 0 },
   confirmBar: { marginTop: 20, padding: 16, background: '#f0f4ff', border: '1px solid #c7d7ff', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 12 },
+  notification: { background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 6, padding: '12px 16px', marginBottom: 12, fontSize: 14, color: '#856404', fontWeight: 'bold' },
 }
 
 export default App

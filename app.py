@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request, redirect, url_for, session, Response, stream_with_context
 from google.auth.exceptions import RefreshError
 from crawler import crawl_website
-from db import init_db, get_setting, save_setting, delete_draft, get_draft, get_website_content, save_website_content, save_email_pending, update_draft_status
+from db import init_db, get_setting, save_setting, delete_draft, get_draft, get_website_content, save_website_content, save_email_pending, update_draft_status, get_db
 from gmail import get_oauth_flow, credentials_to_dict
 from flask_cors import CORS
 
@@ -197,10 +197,19 @@ def send():
     service = get_gmail_service(session["credentials"])
     data = request.get_json()
 
-    send_reply(service, data["to"], data["subject"], data["body"], data["thread_id"], data["message_id"])
-    archive_email(service, data["gmail_id"])
-    delete_draft(data["gmail_id"])
+    try:
+        send_reply(service, data["to"], data["subject"], data["body"], data["thread_id"], data["message_id"])
+        archive_email(service, data["gmail_id"])
+    except Exception as e:
+        if "404" in str(e) or "invalid" in str(e).lower():
+            delete_draft(data["gmail_id"])
+            ids = session.get("drafted_email_ids", [])
+            ids = [i for i in ids if i != data["gmail_id"]]
+            session["drafted_email_ids"] = ids
+            return jsonify({"error": "email_not_found"}), 404
+        raise
 
+    delete_draft(data["gmail_id"])
     ids = session.get("drafted_email_ids", [])
     ids = [i for i in ids if i != data["gmail_id"]]
     session["drafted_email_ids"] = ids
@@ -219,8 +228,17 @@ def dismiss():
     gmail_id = data.get("gmail_id")
 
     if gmail_id:
-        label_email(service, gmail_id, "needs-manual-review")
-        archive_email(service, gmail_id)
+        try:
+            label_email(service, gmail_id, "needs-manual-review")
+            archive_email(service, gmail_id)
+        except Exception as e:
+            if "404" in str(e) or "invalid" in str(e).lower():
+                delete_draft(gmail_id)
+                ids = session.get("drafted_email_ids", [])
+                ids = [i for i in ids if i != gmail_id]
+                session["drafted_email_ids"] = ids
+                return jsonify({"error": "email_not_found"}), 404
+            raise
         delete_draft(gmail_id)
 
     ids = session.get("drafted_email_ids", [])
@@ -313,6 +331,23 @@ def save_draft_edit():
 def logout():
     session.clear()
     return jsonify({"logged_out": True})
+
+@app.route("/api/regenerate_all", methods=["POST"])
+def regenerate_all():
+    if not session.get("credentials"):
+        return jsonify({"error": "not_connected"}), 401
+
+    account = current_account()
+    ids = session.get("drafted_email_ids", [])
+
+    conn = get_db()
+    for gmail_id in ids:
+        conn.execute("UPDATE emails SET draft_reply = '', status = 'pending' WHERE gmail_id = ?", (gmail_id,))
+    conn.commit()
+    conn.close()
+
+    emails = get_emails_from_db(ids)
+    return jsonify({"emails": emails})
 
 @app.route("/crawled-content")
 def crawled_content():
