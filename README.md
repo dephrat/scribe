@@ -64,6 +64,12 @@ In the prompt, in `ai.py`, each rule targets a failure I actually hit while test
 Drafts run at `temperature=0` so the same email produces the same draft, which makes
 prompt changes possible to evaluate.
 
+The mechanical half of that is tested rather than asserted. `tests/test_grounding.py`
+covers what survives a crawl: external URLs stripped, own-domain URLs kept, the
+surrounding prose intact, sitemap indexes never returning their own `.xml` URLs as
+pages, and the page and crawl budgets holding. The tests stub every HTTP call, so
+they need no network and no API key.
+
 The other guardrail is structural. Human review is the architecture, not a disclaimer.
 There is no path in the code that sends a reply without someone pressing send, and
 edit, regenerate and dismiss are first-class states rather than escape hatches. A
@@ -81,11 +87,11 @@ cd client && npm install && cd ..
 ```
 
 Put the OAuth client JSON at `credentials/credentials.json`, or point
-`GOOGLE_CLIENT_SECRETS` somewhere else. Create `.env`:
+`GOOGLE_CLIENT_SECRETS` somewhere else. Then copy the environment template and fill
+in your keys:
 
-```
-ANTHROPIC_API_KEY=sk-ant-...
-SECRET_KEY=any-random-string
+```bash
+cp .env.example .env
 ```
 
 Run both processes:
@@ -98,6 +104,14 @@ cd client && npm run dev   # Vite on :5174
 Open http://localhost:5174, connect the inbox, then set the website URL and the sender
 whitelist in settings and run a crawl before fetching mail.
 
+## Tests
+
+```bash
+python -m unittest discover -s tests
+```
+
+Standard library only, no test dependencies to install.
+
 ## Notes
 
 - OAuth runs over plain HTTP for local development (`OAUTHLIB_INSECURE_TRANSPORT`).
@@ -106,3 +120,7 @@ whitelist in settings and run a crawl before fetching mail.
   a single-user demo and would need real storage for anything more.
 - The requested Gmail scope is `gmail.modify`, because sending, labeling and archiving
   all need it. It is broader than I would want in production.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
