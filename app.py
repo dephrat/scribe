@@ -17,6 +17,9 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
+
+# Where the Vite dev server lives; OAuth returns the user here.
+CLIENT_URL = os.getenv("CLIENT_URL", "http://localhost:5174")
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = False
 
@@ -72,7 +75,7 @@ def oauth_callback():
     service = get_gmail_service(session["credentials"])
     session["account_email"] = get_account_email(service)
 
-    return redirect("http://localhost:5173")
+    return redirect(CLIENT_URL)
 
 @app.route("/api/fetch")
 def fetch():

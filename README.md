@@ -92,10 +92,10 @@ Run both processes:
 
 ```bash
 python app.py          # Flask on :5001
-cd client && npm run dev   # Vite on :5173
+cd client && npm run dev   # Vite on :5174
 ```
 
-Open http://localhost:5173, connect the inbox, then set the website URL and the sender
+Open http://localhost:5174, connect the inbox, then set the website URL and the sender
 whitelist in settings and run a crawl before fetching mail.
 
 ## Notes
