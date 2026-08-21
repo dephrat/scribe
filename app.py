@@ -20,6 +20,12 @@ app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 # Where the Vite dev server lives; OAuth returns the user here.
 CLIENT_URL = os.getenv("CLIENT_URL", "http://localhost:5174")
+
+DEFAULT_BUSINESS_BRIEF = (
+    "I am a small business owner. Please reply professionally and friendly on my behalf. "
+    "If you don't have enough information to answer a question, let the sender know and "
+    "suggest they contact us directly."
+)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = False
 
@@ -121,7 +127,7 @@ def generate():
     gmail_ids = data.get("gmail_ids", [])
     account = current_account()
 
-    business_brief = get_setting("business_brief", "", account)
+    business_brief = get_setting("business_brief", DEFAULT_BUSINESS_BRIEF, account)
     content = get_website_content(account)
     if content:
         business_brief = business_brief + "\n\nWebsite content:\n" + content
@@ -263,7 +269,7 @@ def regenerate():
 
     data = request.get_json()
     gmail_id = data.get("gmail_id")
-    business_brief = get_setting("business_brief", "", current_account())
+    business_brief = get_setting("business_brief", DEFAULT_BUSINESS_BRIEF, current_account())
 
     content = get_website_content(current_account())
     if content:
@@ -303,7 +309,7 @@ def settings():
 
     return jsonify({
         "owner_name": get_setting("owner_name", "", account),
-        "business_brief": get_setting("business_brief", "I am a small business owner. Please reply professionally and friendly on my behalf. If you don't have enough information to answer a question, let the sender know and suggest they contact us directly.", account),
+        "business_brief": get_setting("business_brief", DEFAULT_BUSINESS_BRIEF, account),
         "whitelist": get_setting("whitelist", "", account),
         "website_url": get_setting("website_url", "", account),
         "max_crawl_pages": get_setting("max_crawl_pages", "10", account),
