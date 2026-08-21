@@ -96,19 +96,33 @@ def get_new_emails(service, whitelist, max_emails=100):
 
         headers = {h["name"]: h["value"] for h in msg_data["payload"]["headers"]}
 
-        body = ""
+        plain_body = ""
+        html_body = ""
+
+        def extract_parts(parts):
+            nonlocal plain_body, html_body
+            for part in parts:
+                if part["mimeType"] == "text/plain" and not plain_body:
+                    data = part.get("body", {}).get("data", "")
+                    if data:
+                        plain_body = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+                elif part["mimeType"] == "text/html" and not html_body:
+                    data = part.get("body", {}).get("data", "")
+                    if data:
+                        raw_html = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+                        html_body = strip_html(raw_html)
+                elif part["mimeType"].startswith("multipart/") and "parts" in part:
+                    extract_parts(part["parts"])
+
         payload = msg_data["payload"]
         if "parts" in payload:
-            for part in payload["parts"]:
-                if part["mimeType"] == "text/plain":
-                    body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
-                    break
-                elif part["mimeType"] == "text/html" and not body:
-                    raw_html = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
-                    body = strip_html(raw_html)
+            extract_parts(payload["parts"])
         elif "body" in payload and "data" in payload["body"]:
-            body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
+            plain_body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="replace")
 
+        # Prefer the plain-text part; fall back to the stripped HTML for senders
+        # who ship an empty plain part or no plain part at all.
+        body = plain_body if plain_body.strip() else html_body
         body = clean_body(body)
 
         date_val = headers.get("Date", "")
