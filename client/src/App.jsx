@@ -197,7 +197,9 @@ function App() {
   const eventSourceRef = useRef(null)
   const notificationTimerRef = useRef(null)
   const email = emails[currentIndex]
-  const isGenerating = email && (!email.draft_reply || email.status === 'pending' || email.status === 'generating')
+  const hasError = email && email.status === 'error'
+  const isGenerating = email && !hasError && (!email.draft_reply || email.status === 'pending' || email.status === 'generating')
+  const canSend = email && !isGenerating && !hasError && !!email.draft_reply
 
   function formatDate(dateStr, tz) {
     if (!dateStr) return ''
@@ -259,12 +261,12 @@ function App() {
       }
 
       if (e.key === 'e' || e.key === 'E') {
-        if (!isGenerating) {
+        if (canSend) {
           e.preventDefault()
           startEdit()
         }
       } else if (e.key === 'a' || e.key === 'A') {
-        if (!isGenerating) {
+        if (canSend) {
           setConfirmAction('send')
           window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
         }
@@ -281,7 +283,7 @@ function App() {
 
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [email, editMode, confirmAction, currentIndex, emails, isGenerating, regenerating])
+  }, [email, editMode, confirmAction, currentIndex, emails, isGenerating, canSend, regenerating])
 
   async function checkStatus() {
     try {
@@ -515,6 +517,10 @@ function App() {
             <div style={styles.sectionLabel}>Draft Reply</div>
             {isGenerating ? (
               <div style={{...styles.draft, color: '#999', fontStyle: 'italic'}}>Generating...</div>
+            ) : hasError ? (
+              <div style={{...styles.draft, color: '#c0392b'}}>
+                Generation failed. Check the Flask terminal for the error, then press Regenerate.
+              </div>
             ) : editMode ? (
               <textarea
                 style={styles.textarea}
@@ -549,7 +555,7 @@ function App() {
             </div>
           ) : (
             <div style={styles.actions}>
-              <button onClick={() => setConfirmAction('send')} disabled={isGenerating} style={{...styles.approveBtn, opacity: isGenerating ? 0.4 : 1}}>Approve & Send</button>
+              <button onClick={() => setConfirmAction('send')} disabled={!canSend} style={{...styles.approveBtn, opacity: !canSend ? 0.4 : 1}}>Approve & Send</button>
               <button onClick={() => setConfirmAction('dismiss')} style={styles.dismissBtn}>Dismiss</button>
               <button
                 onClick={() => setConfirmAction('regen')}
@@ -571,7 +577,7 @@ function App() {
                   })
                 }} style={styles.editBtn}>Done</button>
               ) : (
-                <button onClick={startEdit} disabled={isGenerating} style={{...styles.editBtn, opacity: isGenerating ? 0.4 : 1}}>Edit</button>
+                <button onClick={startEdit} disabled={!canSend} style={{...styles.editBtn, opacity: !canSend ? 0.4 : 1}}>Edit</button>
               )}
             </div>
           )}

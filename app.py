@@ -1,6 +1,7 @@
 import os
 import json
 import threading
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, redirect, url_for, session, Response, stream_with_context
@@ -133,6 +134,8 @@ def generate():
             reply = draft_reply(existing["body"], existing["sender"], existing["subject"], business_brief)
             update_draft_status(gmail_id, "ready", reply)
         except Exception as e:
+            print(f"[generate] FAILED {gmail_id} ({type(e).__name__}): {e}")
+            traceback.print_exc()
             update_draft_status(gmail_id, "error")
         # push SSE event
         with sse_lock:
@@ -272,6 +275,8 @@ def regenerate():
             updated = get_draft(gmail_id)
             return jsonify({"email": updated})
         except Exception as e:
+            print(f"[regenerate] FAILED {gmail_id} ({type(e).__name__}): {e}")
+            traceback.print_exc()
             update_draft_status(gmail_id, "error")
             return jsonify({"error": str(e)}), 500
 

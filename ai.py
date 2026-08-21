@@ -35,6 +35,8 @@ Write a professional, friendly reply on behalf of the business owner. Keep it co
             return message.content[0].text
         except anthropic.RateLimitError:
             if attempt < 2:
+                print(f"[ai] rate limited, sleeping 10s (attempt {attempt + 1}/3)")
                 time.sleep(10)
                 continue
+            print("[ai] rate limited, giving up after 3 attempts")
             raise
