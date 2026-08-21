@@ -303,7 +303,7 @@ def settings():
 
     return jsonify({
         "owner_name": get_setting("owner_name", "", account),
-        "business_brief": get_setting("business_brief", "", account),
+        "business_brief": get_setting("business_brief", "I am a small business owner. Please reply professionally and friendly on my behalf. If you don't have enough information to answer a question, let the sender know and suggest they contact us directly.", account),
         "whitelist": get_setting("whitelist", "", account),
         "website_url": get_setting("website_url", "", account),
         "max_crawl_pages": get_setting("max_crawl_pages", "10", account),
