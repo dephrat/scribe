@@ -319,8 +319,9 @@ def crawl():
     website_url = get_setting("website_url", "", account)
     max_pages = int(get_setting("max_crawl_pages", "10", account) or "10")
     additional_urls = [u.strip() for u in get_setting("additional_urls", "", account).split(",") if u.strip()]
+    exclude_patterns = [p.strip() for p in get_setting("exclude_url_patterns", "", account).split(",") if p.strip()]
     if website_url:
-        content = crawl_website(website_url, max_pages, additional_urls)
+        content = crawl_website(website_url, max_pages, additional_urls, exclude_patterns)
         save_website_content(account, content)
     return jsonify({"crawled": True})
 
