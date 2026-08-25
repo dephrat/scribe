@@ -6,3 +6,10 @@ __pycache__/
 *.pyc
 .DS_Store
 HANDOFF.md
+
+# editor swap and backup files - these are how the Catalog key leak happened
+*.swp
+*.swo
+*~
+.env*
+!.env.example
