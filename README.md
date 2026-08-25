@@ -10,6 +10,13 @@ This is the v1 prototype that proved the idea. The production version I built la
 for a client is an n8n pipeline with escalation over WhatsApp, so treat this repo as
 a working demo rather than a deployed service.
 
+![The review dashboard: an incoming question, the drafted reply, and the actions a
+human can take on it](docs/dashboard.png)
+
+The draft above is the behaviour worth looking at. The sender asks three things. The
+crawled site answers two of them, so the reply answers those, and on the third it says
+it does not have enough detail rather than inventing an integration that may not exist.
+
 ## How it works
 
 ```
